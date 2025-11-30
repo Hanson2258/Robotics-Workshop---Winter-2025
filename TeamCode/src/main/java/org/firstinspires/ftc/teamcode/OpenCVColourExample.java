@@ -40,6 +40,11 @@ public class OpenCVColourExample extends OpMode
     PurpleBlobPipeline purpleBlobPipeline;
     long lastButtonPress = 0;
 
+    public static Scalar PURPLE_HSV_RANGE_LOW = new Scalar(120.0, 60.0, 0.0);
+    public static Scalar PURPLE_HSV_RANGE_HIGH = new Scalar(190.0, 255.0, 255.0);
+    public static Scalar GREEN_HSV_RANGE_LOW = new Scalar(70.0, 60.0, 25.0);
+    public static Scalar GREEN_HSV_RANGE_HIGH = new Scalar(110.0, 255.0, 255.0);
+
     /**
      * Stages (filters) in this EasyOpenCV Pipeline.
      */
@@ -48,8 +53,10 @@ public class OpenCVColourExample extends OpMode
         RAW_IMAGE,
         RAW_IMAGE_TO_HSV,
         THRESHOLD,
+        DILATE,
         ERODE,
         CONTOURS_OVERLAY_ON_FRAME,
+        CONTOURS_AFTER_REMOVING_INNER_CONTOUR,
         BOUNDING_BOX
     }
 
@@ -112,6 +119,20 @@ public class OpenCVColourExample extends OpMode
 
             currentStageNum = nextStageNum;
         }
+        else if (gamepad1.b && (System.currentTimeMillis() - lastButtonPress) > 200)
+        {
+            int previousStageNum = currentStageNum - 1;
+            lastButtonPress = System.currentTimeMillis();
+
+            if(previousStageNum < 0)
+            {
+                previousStageNum = stages.length - 1;
+            }
+
+            stageToRenderToViewport = stages[previousStageNum];
+
+            currentStageNum = previousStageNum;
+        }
 
         telemetry.update();
     }
@@ -133,6 +154,9 @@ public class OpenCVColourExample extends OpMode
         // Variable to store blob location
         public static String blobLocation;
 
+        // Dilating the thresholded area to remove small bits that may be thought as separate.
+        public static int DILATE_PASSES = 2;
+
         // The more Erode passes you do, the more noise will be removed (but if you do too much, you
         // may erode your object. A good balance is key - Remember you don't have to remove all
         // noise. Part of the pipeline is to select the biggest blob, removing noise simply reduces
@@ -148,16 +172,20 @@ public class OpenCVColourExample extends OpMode
         public static volatile Scalar BOUNDING_RECTANGLE_COLOR = new Scalar(0, 255, 0);
 
         // Range for a Purple Blob
-        public static Scalar LOW_HSV_RANGE_PURPLE = new Scalar(120.0, 60.0, 100.0);
-        public static Scalar HIGH_HSV_RANGE_PURPLE = new Scalar(170.0, 255.0, 255.0);
+        public static Scalar targetHSVRangeLow = GREEN_HSV_RANGE_LOW;
+        public static Scalar targetHSVRangeHigh = GREEN_HSV_RANGE_HIGH;
 
         // Mat object initialization
         private final Mat hsvMat    = new Mat(),
                 hierarchy           = new Mat(),
+                hierarchyExternal   = new Mat(),
+                cvDilateKernel      = new Mat(),
                 cvErodeKernel       = new Mat(),
                 thresholdOutput     = new Mat(),
+                dilateOutput        = new Mat(),
                 erodeOutput         = new Mat(),
-                contoursOutput      = new Mat();
+                contoursOutput      = new Mat(),
+                bigContoursOutput   = new Mat();
 
         /**
          * Pipeline to process the frame.
@@ -170,13 +198,25 @@ public class OpenCVColourExample extends OpMode
         {
             // Convert color to HSV
             Imgproc.cvtColor(input, hsvMat, Imgproc.COLOR_RGB2HSV);
+//            textOverlay(input, "HSV");
 
             // Checks if the image is in range
-            Core.inRange(hsvMat, LOW_HSV_RANGE_PURPLE, HIGH_HSV_RANGE_PURPLE, thresholdOutput);
+            Core.inRange(hsvMat, targetHSVRangeLow, targetHSVRangeHigh, thresholdOutput);
+//            textOverlay(thresholdOutput, "Threshold");
+
+            // Dilate to combine
+            Imgproc.dilate(
+                    thresholdOutput,
+                    dilateOutput,
+                    cvDilateKernel,
+                    CV_ANCHOR,
+                    DILATE_PASSES,
+                    CV_BORDER_TYPE,
+                    CV_BORDER_VALUE);
 
             // Erode to remove noise
             Imgproc.erode(
-                    thresholdOutput,
+                    dilateOutput,
                     erodeOutput,
                     cvErodeKernel,
                     CV_ANCHOR,
@@ -198,17 +238,28 @@ public class OpenCVColourExample extends OpMode
                 boundRect[i] = Imgproc.boundingRect(new MatOfPoint(contoursPoly[i].toArray()));
             }
 
+            // Filter out all inner contours
+            List<MatOfPoint> externalContours = new ArrayList<>();
+            Imgproc.findContours(
+                    erodeOutput,
+                    externalContours,
+                    hierarchyExternal,
+                    Imgproc.RETR_EXTERNAL,
+                    Imgproc.CHAIN_APPROX_SIMPLE
+            );
+
+            // Compute bounding boxes only from EXTERNAL contours
             Rect biggestBoundingBox = new Rect(0, 0, 0, 0);
 
-            // Gets the biggest bounding box
-            for (Rect rect : boundRect)
+            for (MatOfPoint contour : externalContours)
             {
+                Rect rect = Imgproc.boundingRect(contour);
+
                 if (rect.area() > biggestBoundingBox.area())
                 {
                     biggestBoundingBox = rect;
                 }
             }
-
             if (biggestBoundingBox.area() != 0)
             { // If blob is detected
                 if (biggestBoundingBox.x < LEFT_X)
@@ -245,6 +296,11 @@ public class OpenCVColourExample extends OpMode
                     return thresholdOutput;
                 }
 
+                case DILATE:
+                {
+                    return dilateOutput;
+                }
+
                 case ERODE:
                 {
                     return erodeOutput;
@@ -256,6 +312,14 @@ public class OpenCVColourExample extends OpMode
                     Imgproc.drawContours(contoursOutput, contours, -1, new Scalar(0, 255, 0), 1, 8);
 
                     return contoursOutput;
+                }
+
+                case CONTOURS_AFTER_REMOVING_INNER_CONTOUR:
+                {
+                    input.copyTo(bigContoursOutput);
+                    Imgproc.drawContours(bigContoursOutput, externalContours, -1, new Scalar(0, 255, 0), 1, 8);
+
+                    return bigContoursOutput;
                 }
 
                 case BOUNDING_BOX:
@@ -282,6 +346,24 @@ public class OpenCVColourExample extends OpMode
         private static String getCurrentStage()
         {
             return stageToRenderToViewport.name();
+        }
+
+        public void textOverlay(Mat imageInput ,String textToDisplay) {
+            Point position = new Point(200, 200);    // x, y position on screen
+            int font = Imgproc.FONT_HERSHEY_SIMPLEX;
+            double fontScale = 0.2;
+            Scalar color = new Scalar(255, 255, 255);   // white text (B,G,R)
+            int thickness = 1;
+
+            Imgproc.putText(
+                    imageInput,
+                    textToDisplay,
+                    position,
+                    font,
+                    fontScale,
+                    color,
+                    thickness
+            );
         }
     }
 }
