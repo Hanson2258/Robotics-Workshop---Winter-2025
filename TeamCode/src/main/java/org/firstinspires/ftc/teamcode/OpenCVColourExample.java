@@ -1,17 +1,16 @@
-// Pipeline base taken from FTC team Reynolds Reybots 18840
-
 package org.firstinspires.ftc.teamcode;
 
 
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
+
+import org.opencv.core.Size;
 import org.openftc.easyopencv.OpenCvPipeline;
 import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
 
 import org.opencv.core.Core;
 import org.opencv.core.Mat;
 import org.opencv.core.MatOfPoint;
-import org.opencv.core.MatOfPoint2f;
 import org.opencv.core.Point;
 import org.opencv.core.Rect;
 import org.opencv.core.Scalar;
@@ -30,14 +29,14 @@ import java.util.List;
  * to cycle to the next one while in the camera stream. Return to the main interface (where you can
  * see telemetry) to cycle.
  *
- * It currently detects for a purple blob.
+ * It currently detects for a colour blob.
  */
 @TeleOp(name="OpenCV Colour Example", group="OpenCV")
 public class OpenCVColourExample extends OpMode
 {
     // Variable declaration
     OpenCvCamera camera;
-    PurpleBlobPipeline purpleBlobPipeline;
+    ColourBlobPipeline colourBlobPipeline;
     long lastButtonPress = 0;
 
     public static Scalar PURPLE_HSV_RANGE_LOW = new Scalar(120.0, 60.0, 0.0);
@@ -72,7 +71,7 @@ public class OpenCVColourExample extends OpMode
     @Override
     public void init()
     {
-        purpleBlobPipeline = new PurpleBlobPipeline();
+        colourBlobPipeline = new ColourBlobPipeline();
 
         int cameraMonitorViewId = hardwareMap
                 .appContext
@@ -86,7 +85,7 @@ public class OpenCVColourExample extends OpMode
         camera.openCameraDeviceAsync(new OpenCvCamera.AsyncCameraOpenListener() {
             @Override public void onOpened() {
                 camera.startStreaming(320, 240, OpenCvCameraRotation.UPRIGHT);
-                camera.setPipeline(purpleBlobPipeline);
+                camera.setPipeline(colourBlobPipeline);
             }
 
             @Override public void onError(int errorCode) {
@@ -102,8 +101,8 @@ public class OpenCVColourExample extends OpMode
     @Override
     public void init_loop()
     {
-        telemetry.addData("Blob location is", PurpleBlobPipeline.getBlobLocation());
-        telemetry.addData("Current filter", PurpleBlobPipeline.getCurrentStage());
+        telemetry.addData("Blob location is", ColourBlobPipeline.getBlobLocation());
+        telemetry.addData("Current filter", ColourBlobPipeline.getCurrentStage());
 
         if (gamepad1.a && (System.currentTimeMillis() - lastButtonPress) > 200)
         {
@@ -141,9 +140,9 @@ public class OpenCVColourExample extends OpMode
 
 
     /**
-     * EasyOpenCV Pipeline to detect Purple Blob.
+     * EasyOpenCV Pipeline to detect Colour Blob.
      */
-    static class PurpleBlobPipeline extends OpenCvPipeline
+    static class ColourBlobPipeline extends OpenCvPipeline
     {
         public static int CAMERA_WIDTH = 320;
 
@@ -171,7 +170,7 @@ public class OpenCVColourExample extends OpMode
         // Colour of the Bounding Rectangle
         public static volatile Scalar BOUNDING_RECTANGLE_COLOR = new Scalar(0, 255, 0);
 
-        // Range for a Purple Blob
+        // Range for a Colour Blob
         public static Scalar targetHSVRangeLow = GREEN_HSV_RANGE_LOW;
         public static Scalar targetHSVRangeHigh = GREEN_HSV_RANGE_HIGH;
 
@@ -185,7 +184,8 @@ public class OpenCVColourExample extends OpMode
                 dilateOutput        = new Mat(),
                 erodeOutput         = new Mat(),
                 contoursOutput      = new Mat(),
-                bigContoursOutput   = new Mat();
+                bigContoursOutput   = new Mat(),
+                output              = new Mat();
 
         /**
          * Pipeline to process the frame.
@@ -198,11 +198,9 @@ public class OpenCVColourExample extends OpMode
         {
             // Convert color to HSV
             Imgproc.cvtColor(input, hsvMat, Imgproc.COLOR_RGB2HSV);
-//            textOverlay(input, "HSV");
 
             // Checks if the image is in range
             Core.inRange(hsvMat, targetHSVRangeLow, targetHSVRangeHigh, thresholdOutput);
-//            textOverlay(thresholdOutput, "Threshold");
 
             // Dilate to combine
             Imgproc.dilate(
@@ -227,16 +225,6 @@ public class OpenCVColourExample extends OpMode
             // Finds the contours of the image
             List<MatOfPoint> contours = new ArrayList<>();
             Imgproc.findContours(erodeOutput, contours, hierarchy, Imgproc.RETR_TREE, Imgproc.CHAIN_APPROX_SIMPLE);
-
-            // Creates bounding rectangles along all of the detected contours
-            MatOfPoint2f[] contoursPoly = new MatOfPoint2f[contours.size()];
-            Rect[] boundRect = new Rect[contours.size()];
-            for (int i = 0; i < contours.size(); i++)
-            {
-                contoursPoly[i] = new MatOfPoint2f();
-                Imgproc.approxPolyDP(new MatOfPoint2f(contours.get(i).toArray()), contoursPoly[i], 3, true);
-                boundRect[i] = Imgproc.boundingRect(new MatOfPoint(contoursPoly[i].toArray()));
-            }
 
             // Filter out all inner contours
             List<MatOfPoint> externalContours = new ArrayList<>();
@@ -283,27 +271,27 @@ public class OpenCVColourExample extends OpMode
                 default:
                 case RAW_IMAGE:
                 {
-                    return input;
+                    return textOverlay(input, "Original");
                 }
 
                 case RAW_IMAGE_TO_HSV:
                 {
-                    return hsvMat;
+                    return textOverlay(hsvMat, "HSV");
                 }
 
                 case THRESHOLD:
                 {
-                    return thresholdOutput;
+                    return textOverlay(thresholdOutput, "Threshold");
                 }
 
                 case DILATE:
                 {
-                    return dilateOutput;
+                    return textOverlay(dilateOutput, "Dilate");
                 }
 
                 case ERODE:
                 {
-                    return erodeOutput;
+                    return textOverlay(erodeOutput, "Erode");
                 }
 
                 case CONTOURS_OVERLAY_ON_FRAME:
@@ -311,7 +299,7 @@ public class OpenCVColourExample extends OpMode
                     input.copyTo(contoursOutput);
                     Imgproc.drawContours(contoursOutput, contours, -1, new Scalar(0, 255, 0), 1, 8);
 
-                    return contoursOutput;
+                    return textOverlay(contoursOutput, "Contours");
                 }
 
                 case CONTOURS_AFTER_REMOVING_INNER_CONTOUR:
@@ -319,13 +307,13 @@ public class OpenCVColourExample extends OpMode
                     input.copyTo(bigContoursOutput);
                     Imgproc.drawContours(bigContoursOutput, externalContours, -1, new Scalar(0, 255, 0), 1, 8);
 
-                    return bigContoursOutput;
+                    return textOverlay(bigContoursOutput, "Ext contours");
                 }
 
                 case BOUNDING_BOX:
                 {
                     Imgproc.rectangle(input, biggestBoundingBox, BOUNDING_RECTANGLE_COLOR);
-                    return input;
+                    return textOverlay(input, "Bounding");
                 }
             }
         }
@@ -348,22 +336,43 @@ public class OpenCVColourExample extends OpMode
             return stageToRenderToViewport.name();
         }
 
-        public void textOverlay(Mat imageInput ,String textToDisplay) {
-            Point position = new Point(200, 200);    // x, y position on screen
-            int font = Imgproc.FONT_HERSHEY_SIMPLEX;
-            double fontScale = 0.2;
-            Scalar color = new Scalar(255, 255, 255);   // white text (B,G,R)
+        private Mat textOverlay(Mat input, String label){
+            // text properties
+            int fontFace = Imgproc.FONT_HERSHEY_SIMPLEX;
+            double fontScale = 0.5;
             int thickness = 1;
+            int[] baseLine = new int[1];
 
-            Imgproc.putText(
-                    imageInput,
-                    textToDisplay,
-                    position,
-                    font,
+            // measure text
+            Size textSize = Imgproc.getTextSize(label, fontFace, fontScale, thickness, baseLine);
+
+            // desired offsets from the right and top edges (pixels)
+            int rightPadding = 10;
+            int topPadding = 10;
+
+            // compute origin so text is anchored at top-right
+            int originX = (int) Math.round(input.cols() - rightPadding - textSize.width);
+            int originY = (int) Math.round(topPadding + textSize.height);
+
+            // clamp inside image
+            originX = Math.max(0, originX);
+            originY = Math.max((int)textSize.height, Math.min(input.rows(), originY));
+
+            // optional background rectangle for readability
+            Point rectTl = new Point(originX - 6, originY - textSize.height - 6); // top-left of rect
+            Point rectBr = new Point(originX + textSize.width + 6, originY + 6);   // bottom-right of rect
+            Imgproc.rectangle(input, rectTl, rectBr, new Scalar(0,0,0), -1);
+
+            // draw text (origin is baseline-left)
+            Imgproc.putText(input,
+                    label,
+                    new Point(originX, originY),
+                    fontFace,
                     fontScale,
-                    color,
-                    thickness
-            );
+                    new Scalar(255, 255, 255),
+                    thickness);
+
+            return input;
         }
     }
 }
